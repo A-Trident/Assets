@@ -1,7 +1,7 @@
 # Assets
 Assets for personal project development
 
-#SelfSignedCertificate
+# SelfSignedCertificate
 
 New-SelfSignedCertificate `
     -Type CodeSigningCert `
