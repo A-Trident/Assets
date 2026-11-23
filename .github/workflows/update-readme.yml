@@ -24,7 +24,7 @@ jobs:
         run: |
           $repoOwner = "${{ github.repository_owner }}"
           $repoName  = "${{ github.event.repository.name }}"
-          $branch    = "main"
+          $branch    = "${{ github.ref_name }}"
 
           # Exclude system/doc files
           $excludeExt = @('.md', '.yml', '.yaml', '.gitignore', '.gitattributes', '.ps1')
@@ -42,7 +42,7 @@ jobs:
               "🎨 Backgrounds & Other"  = @()
           }
 
-          $grouped = @{
+          $grouped = [ordered]@{
               "🖼️ Images & UI Graphics" = @()
               "🎯 Icons & Vectors"      = @()
               "🎬 Videos & Animations"  = @()
@@ -52,9 +52,8 @@ jobs:
           foreach ($file in $files) {
               $ext = $file.Extension.ToLower()
               $relPath = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
-              
-              # Prioritize "background" or "wallpaper" in filename/folder into Backgrounds category
-              if ($relPath -match '(background|wallpaper|bg[-_])') {
+
+              if ($relPath -match '(?i)(background|wallpaper|bg[-_])') {
                   $grouped["🎨 Backgrounds & Other"] += $relPath
               }
               elseif ($categories["🖼️ Images & UI Graphics"] -contains $ext) {
@@ -83,9 +82,8 @@ jobs:
                       $encodedPath = ($path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
                       $cdnUrl = "https://cdn.jsdelivr.net/gh/$repoOwner/$repoName@$branch/$encodedPath"
                       $rawUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath"
-                      $fileName = Split-Path $path -Leaf
                       $ext = [System.IO.Path]::GetExtension($path).ToLower()
-                      
+
                       $preview = if (@('.png','.jpg','.jpeg','.webp','.gif','.svg','.ico') -contains $ext) {
                           "<img src=`"$rawUrl`" width=`"40`" />"
                       } else {
@@ -102,8 +100,16 @@ jobs:
           }
 
           $readmePath = "README.md"
+          if (-not (Test-Path $readmePath)) {
+              throw "README.md not found in repository root."
+          }
+
           $content = Get-Content $readmePath -Raw
           $pattern = '(?s)<!-- ASSETS-START -->.*?<!-- ASSETS-END -->'
+          if ($content -notmatch $pattern) {
+              throw "Markers <!-- ASSETS-START --> and <!-- ASSETS-END --> not found in README.md."
+          }
+
           $replacement = "<!-- ASSETS-START -->`n$($sb.ToString().Trim())`n<!-- ASSETS-END -->"
           $updatedContent = [regex]::Replace($content, $pattern, $replacement)
           Set-Content -Path $readmePath -Value $updatedContent -NoNewline
