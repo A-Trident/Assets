@@ -6,7 +6,6 @@ on:
       - main
     paths-ignore:
       - 'README.md'
-      - '.github/**'
   workflow_dispatch:
 
 permissions:
@@ -19,105 +18,98 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Scan Assets & Update README.md
-        shell: pwsh
+      - name: Scan All Folders & Update README.md
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          $repoOwner = "${{ github.repository_owner }}"
-          $repoName  = "${{ github.event.repository.name }}"
-          $branch    = "${{ github.ref_name }}"
+          python3 - <<'EOF'
+          import os
+          import re
+          import urllib.parse
 
-          # Exclude system/doc files
-          $excludeExt = @('.md', '.yml', '.yaml', '.gitignore', '.gitattributes', '.ps1')
-          $files = Get-ChildItem -Recurse -File | Where-Object {
-              $_.FullName -notmatch '[\\/]\.git([\\/]|$)' -and
-              $_.FullName -notmatch '[\\/]\.github([\\/]|$)' -and
-              ($excludeExt -notcontains $_.Extension.ToLower())
+          owner = os.environ["REPO_OWNER"]
+          repo = os.environ["REPO_NAME"]
+          branch = os.environ["BRANCH"]
+
+          ignore_dirs = {".git", ".github"}
+          ignore_files = {"README.md", ".gitignore", ".gitattributes", ".DS_Store"}
+
+          categories = {
+              "🎯 Icons & Logos": [],
+              "🖼️ Images & UI Graphics": [],
+              "🎨 Backgrounds & Wallpapers": [],
+              "🎬 Videos & Animations": [],
+              "📦 Software, Libraries & Other Files": [],
           }
 
-          # Categorize assets automatically
-          $categories = [ordered]@{
-              "🖼️ Images & UI Graphics" = @('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
-              "🎯 Icons & Vectors"      = @('.svg', '.ico', '.icns')
-              "🎬 Videos & Animations"  = @('.mp4', '.webm', '.mov', '.avi', '.lottie', '.json')
-              "🎨 Backgrounds & Other"  = @()
-          }
+          image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+          icon_exts = {".svg", ".ico", ".icns"}
+          video_exts = {".mp4", ".webm", ".mov", ".avi", ".mkv", ".lottie"}
+          preview_exts = image_exts | icon_exts
 
-          $grouped = [ordered]@{
-              "🖼️ Images & UI Graphics" = @()
-              "🎯 Icons & Vectors"      = @()
-              "🎬 Videos & Animations"  = @()
-              "🎨 Backgrounds & Other"  = @()
-          }
+          for root, dirs, files in os.walk("."):
+              dirs[:] = sorted(d for d in dirs if d not in ignore_dirs)
+              for fname in sorted(files):
+                  if fname in ignore_files:
+                      continue
+                  full_path = os.path.join(root, fname)
+                  rel_path = os.path.relpath(full_path, ".").replace("\\", "/")
+                  ext = os.path.splitext(fname)[1].lower()
+                  lower_path = rel_path.lower()
 
-          foreach ($file in $files) {
-              $ext = $file.Extension.ToLower()
-              $relPath = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
+                  if any(k in lower_path for k in ("background", "wallpaper", "bg-", "bg_")) and ext in preview_exts:
+                      categories["🎨 Backgrounds & Wallpapers"].append(rel_path)
+                  elif ext in icon_exts or (any(k in lower_path for k in ("icon", "logo")) and ext in image_exts):
+                      categories["🎯 Icons & Logos"].append(rel_path)
+                  elif ext in image_exts:
+                      categories["🖼️ Images & UI Graphics"].append(rel_path)
+                  elif ext in video_exts:
+                      categories["🎬 Videos & Animations"].append(rel_path)
+                  else:
+                      categories["📦 Software, Libraries & Other Files"].append(rel_path)
 
-              if ($relPath -match '(?i)(background|wallpaper|bg[-_])') {
-                  $grouped["🎨 Backgrounds & Other"] += $relPath
-              }
-              elseif ($categories["🖼️ Images & UI Graphics"] -contains $ext) {
-                  $grouped["🖼️ Images & UI Graphics"] += $relPath
-              }
-              elseif ($categories["🎯 Icons & Vectors"] -contains $ext) {
-                  $grouped["🎯 Icons & Vectors"] += $relPath
-              }
-              elseif ($categories["🎬 Videos & Animations"] -contains $ext) {
-                  $grouped["🎬 Videos & Animations"] += $relPath
-              }
-              else {
-                  $grouped["🎨 Backgrounds & Other"] += $relPath
-              }
-          }
+          lines = []
+          total_files = 0
 
-          $sb = [System.Text.StringBuilder]::new()
-          foreach ($cat in $grouped.Keys) {
-              $items = $grouped[$cat] | Sort-Object
-              if ($items.Count -gt 0) {
-                  [void]$sb.AppendLine("### $cat")
-                  [void]$sb.AppendLine("")
-                  [void]$sb.AppendLine("| File | Preview | Production CDN (`jsDelivr`) | Raw GitHub URL |")
-                  [void]$sb.AppendLine("| :--- | :---: | :--- | :--- |")
-                  foreach ($path in $items) {
-                      $encodedPath = ($path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
-                      $cdnUrl = "https://cdn.jsdelivr.net/gh/$repoOwner/$repoName@$branch/$encodedPath"
-                      $rawUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath"
-                      $ext = [System.IO.Path]::GetExtension($path).ToLower()
+          for cat, items in categories.items():
+              if not items:
+                  continue
+              total_files += len(items)
+              lines.append(f"### {cat}\n")
+              lines.append("| Name & Path | Preview | CDN Link (`jsDelivr`) | Direct Raw |")
+              lines.append("| :--- | :---: | :--- | :---: |")
+              for path in items:
+                  encoded = "/".join(urllib.parse.quote(p) for p in path.split("/"))
+                  cdn_url = f"https://cdn.jsdelivr.net/gh/{owner}/{repo}@{branch}/{encoded}"
+                  raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{encoded}"
+                  ext = os.path.splitext(path)[1].lower()
+                  preview = f'<img src="{raw_url}" width="36" />' if ext in preview_exts else "—"
+                  lines.append(f"| `{path}` | {preview} | `{cdn_url}` | [Raw]({raw_url}) |")
+              lines.append("")
 
-                      $preview = if (@('.png','.jpg','.jpeg','.webp','.gif','.svg','.ico') -contains $ext) {
-                          "<img src=`"$rawUrl`" width=`"40`" />"
-                      } else {
-                          "—"
-                      }
-                      [void]$sb.AppendLine("| ``$path`` | $preview | ``$cdnUrl`` | [Raw]($rawUrl) |")
-                  }
-                  [void]$sb.AppendLine("")
-              }
-          }
+          print(f"Detected {total_files} asset files.")
+          generated_md = "\n".join(lines).strip() if lines else "*No assets uploaded yet.*"
 
-          if ($sb.Length -eq 0) {
-              [void]$sb.AppendLine("*No assets uploaded yet.*")
-          }
+          with open("README.md", "r", encoding="utf-8") as f:
+              readme = f.read()
 
-          $readmePath = "README.md"
-          if (-not (Test-Path $readmePath)) {
-              throw "README.md not found in repository root."
-          }
+          pattern = r"<!-- ASSETS-START -->.*?<!-- ASSETS-END -->"
+          if not re.search(pattern, readme, flags=re.DOTALL):
+              raise RuntimeError("Missing <!-- ASSETS-START --> or <!-- ASSETS-END --> markers in README.md")
 
-          $content = Get-Content $readmePath -Raw
-          $pattern = '(?s)<!-- ASSETS-START -->.*?<!-- ASSETS-END -->'
-          if ($content -notmatch $pattern) {
-              throw "Markers <!-- ASSETS-START --> and <!-- ASSETS-END --> not found in README.md."
-          }
+          replacement = f"<!-- ASSETS-START -->\n{generated_md}\n<!-- ASSETS-END -->"
+          updated = re.sub(pattern, lambda _: replacement, readme, flags=re.DOTALL)
 
-          $replacement = "<!-- ASSETS-START -->`n$($sb.ToString().Trim())`n<!-- ASSETS-END -->"
-          $updatedContent = [regex]::Replace($content, $pattern, $replacement)
-          Set-Content -Path $readmePath -Value $updatedContent -NoNewline
+          with open("README.md", "w", encoding="utf-8") as f:
+              f.write(updated)
+          EOF
 
       - name: Commit & Push Updated README
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
-          git diff --staged --quiet || git commit -m "chore: auto-update asset links in README.md"
+          git diff --staged --quiet || git commit -m "chore: auto-update asset links in README.md [skip ci]"
           git push
