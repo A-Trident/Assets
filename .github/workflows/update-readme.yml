@@ -1,0 +1,117 @@
+name: Auto-Update Asset Links in README
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.github/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Scan Assets & Update README.md
+        shell: pwsh
+        run: |
+          $repoOwner = "${{ github.repository_owner }}"
+          $repoName  = "${{ github.event.repository.name }}"
+          $branch    = "main"
+
+          # Exclude system/doc files
+          $excludeExt = @('.md', '.yml', '.yaml', '.gitignore', '.gitattributes', '.ps1')
+          $files = Get-ChildItem -Recurse -File | Where-Object {
+              $_.FullName -notmatch '[\\/]\.git([\\/]|$)' -and
+              $_.FullName -notmatch '[\\/]\.github([\\/]|$)' -and
+              ($excludeExt -notcontains $_.Extension.ToLower())
+          }
+
+          # Categorize assets automatically
+          $categories = [ordered]@{
+              "🖼️ Images & UI Graphics" = @('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
+              "🎯 Icons & Vectors"      = @('.svg', '.ico', '.icns')
+              "🎬 Videos & Animations"  = @('.mp4', '.webm', '.mov', '.avi', '.lottie', '.json')
+              "🎨 Backgrounds & Other"  = @()
+          }
+
+          $grouped = @{
+              "🖼️ Images & UI Graphics" = @()
+              "🎯 Icons & Vectors"      = @()
+              "🎬 Videos & Animations"  = @()
+              "🎨 Backgrounds & Other"  = @()
+          }
+
+          foreach ($file in $files) {
+              $ext = $file.Extension.ToLower()
+              $relPath = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
+              
+              # Prioritize "background" or "wallpaper" in filename/folder into Backgrounds category
+              if ($relPath -match '(background|wallpaper|bg[-_])') {
+                  $grouped["🎨 Backgrounds & Other"] += $relPath
+              }
+              elseif ($categories["🖼️ Images & UI Graphics"] -contains $ext) {
+                  $grouped["🖼️ Images & UI Graphics"] += $relPath
+              }
+              elseif ($categories["🎯 Icons & Vectors"] -contains $ext) {
+                  $grouped["🎯 Icons & Vectors"] += $relPath
+              }
+              elseif ($categories["🎬 Videos & Animations"] -contains $ext) {
+                  $grouped["🎬 Videos & Animations"] += $relPath
+              }
+              else {
+                  $grouped["🎨 Backgrounds & Other"] += $relPath
+              }
+          }
+
+          $sb = [System.Text.StringBuilder]::new()
+          foreach ($cat in $grouped.Keys) {
+              $items = $grouped[$cat] | Sort-Object
+              if ($items.Count -gt 0) {
+                  [void]$sb.AppendLine("### $cat")
+                  [void]$sb.AppendLine("")
+                  [void]$sb.AppendLine("| File | Preview | Production CDN (`jsDelivr`) | Raw GitHub URL |")
+                  [void]$sb.AppendLine("| :--- | :---: | :--- | :--- |")
+                  foreach ($path in $items) {
+                      $encodedPath = ($path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+                      $cdnUrl = "https://cdn.jsdelivr.net/gh/$repoOwner/$repoName@$branch/$encodedPath"
+                      $rawUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath"
+                      $fileName = Split-Path $path -Leaf
+                      $ext = [System.IO.Path]::GetExtension($path).ToLower()
+                      
+                      $preview = if (@('.png','.jpg','.jpeg','.webp','.gif','.svg','.ico') -contains $ext) {
+                          "<img src=`"$rawUrl`" width=`"40`" />"
+                      } else {
+                          "—"
+                      }
+                      [void]$sb.AppendLine("| ``$path`` | $preview | ``$cdnUrl`` | [Raw]($rawUrl) |")
+                  }
+                  [void]$sb.AppendLine("")
+              }
+          }
+
+          if ($sb.Length -eq 0) {
+              [void]$sb.AppendLine("*No assets uploaded yet.*")
+          }
+
+          $readmePath = "README.md"
+          $content = Get-Content $readmePath -Raw
+          $pattern = '(?s)<!-- ASSETS-START -->.*?<!-- ASSETS-END -->'
+          $replacement = "<!-- ASSETS-START -->`n$($sb.ToString().Trim())`n<!-- ASSETS-END -->"
+          $updatedContent = [regex]::Replace($content, $pattern, $replacement)
+          Set-Content -Path $readmePath -Value $updatedContent -NoNewline
+
+      - name: Commit & Push Updated README
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --staged --quiet || git commit -m "chore: auto-update asset links in README.md"
+          git push
