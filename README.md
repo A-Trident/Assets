@@ -1,12 +1,16 @@
 # Assets
 
-Assets for personal project development (`AuditX Pro`, `AVSA Tech`, and web portals).
+![Repo Status](https://img.shields.io/badge/Assets-Active-2ea44f?style=flat-square)
+![CDN](https://img.shields.io/badge/CDN-jsDelivr-ff5627?style=flat-square)
+![Projects](https://img.shields.io/badge/Projects-AuditX%20Pro%20%7C%20AVSA%20Tech-0969da?style=flat-square)
+
+Centralized asset repository for personal and enterprise project development (`AuditX Pro`, `AVSA Tech`, and web portals).
 
 ---
 
 ## 📦 Repository Asset Index
 
-> **Note:** This section is automatically updated by GitHub Actions whenever files are added, modified, or removed. Use the **jsDelivr CDN** links for production websites and WPF apps, and **Raw URLs** for direct testing.
+> **Auto-Sync Enabled:** This index updates automatically via GitHub Actions whenever files are added, renamed, or deleted. Use **jsDelivr CDN** links in production web apps and WPF clients, and **Raw URLs** for direct testing.
 
 <!-- ASSETS-START -->
 *Push your assets to the repository and trigger the GitHub Action to auto-populate all Image, Icon, Video, and Background links here.*
@@ -16,10 +20,11 @@ Assets for personal project development (`AuditX Pro`, `AVSA Tech`, and web port
 
 ## 🔐 Self-Signed Code Signing Certificate (`AuditX Pro`)
 
-Follow these steps in an **Administrator PowerShell** terminal to generate a local code-signing certificate, establish machine trust, and sign the `AuditX.exe` binary.
+Run these scripts in an **Administrator PowerShell** session to generate a local code-signing certificate, establish machine trust, and sign the `AuditX.exe` binary.
 
 ### Step 1: Generate & Trust the Certificate
-Run this script once on your build machine to create a 5-year RSA 2048-bit code-signing certificate and register it in the local trust stores:
+
+Run once on your build machine to create a 5-year RSA 2048-bit code-signing certificate and register it in the local trust stores:
 
 ```powershell
 # 1. Create output directory if it does not exist
@@ -49,9 +54,11 @@ Import-Certificate -FilePath $cerPath -CertStoreLocation "Cert:\LocalMachine\Roo
 Import-Certificate -FilePath $cerPath -CertStoreLocation "Cert:\LocalMachine\TrustedPublisher" | Out-Null
 
 Write-Host "Certificate successfully installed in Root and TrustedPublisher stores." -ForegroundColor Green
+```
 
-### Step 2: Sign the AuditX.exe Executable
-Use this snippet during your release build process to sign the compiled binary with a SHA-256 timestamp (ensuring the signature remains valid even after the certificate expires):
+### Step 2: Sign the `AuditX.exe` Executable
+
+Run during your release build process to apply a SHA-256 Authenticode signature with an RFC 3161 timestamp (keeping the signature valid even after the certificate expires):
 
 ```powershell
 $exePath = "D:\2. Workspace\AuditX\RS Group\Release\3.0.0.1\AuditX.exe"
@@ -71,13 +78,24 @@ Set-AuthenticodeSignature `
     -FilePath $exePath `
     -Certificate $signingCert `
     -HashAlgorithm SHA256 `
-    -TimestampServer "[http://timestamp.digicert.com](http://timestamp.digicert.com)"
+    -TimestampServer "http://timestamp.digicert.com"
 
-## Verify the applied signature
+# Verify the applied signature
 Get-AuthenticodeSignature -FilePath $exePath | Format-List Status, StatusMessage, SignerCertificate
-### Step 3: Export Private Key Backup (.pfx) (Optional)
-If you migrate to a new development PC or CI/CD runner, export the private key with a strong password:
+```
+
+<details>
+<summary><b>Step 3: Export Private Key Backup (.pfx) (Optional)</b></summary>
+<br>
+
+Use this snippet to back up the certificate and private key before migrating to a new development machine or CI/CD runner:
 
 ```powershell
 $pfxPassword = ConvertTo-SecureString -String "ChangeThisStrongPassword!" -Force -AsPlainText
-Export-PfxCertificate -Cert $signingCert -FilePath "D:\Certificate\AuditX_PrivateBackup.pfx" -Password $pfxPassword
+Export-PfxCertificate `
+    -Cert $signingCert `
+    -FilePath "D:\Certificate\AuditX_PrivateBackup.pfx" `
+    -Password $pfxPassword
+```
+
+</details>
